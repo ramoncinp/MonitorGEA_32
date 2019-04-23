@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <SPI.h>
+#include <HardwareSerial.h>
 #include "Adafruit_GFX.h"
 #include "Adafruit_ILI9341.h"
 #include <Adafruit_FT6206.h>
@@ -11,14 +12,20 @@
 #define TFT_RST 17
 //Pin interrupcion Touch
 #define TOUCH_INT 25
+//Pines de transceiver
+#define TX_ENABLE 14
+#define RX_ENABLE 13
 
 //Declaración de funciones
 void evaluateChoseRect(int x, int y);
 void handleTouch();
 void initPins();
 void drawMainScreen();
+void drawQScreen();
+void txRxToModules();
 void tooglePin();
 void testCircles();
+String handleSerial();
 unsigned long testFillScreen();
 
 //Coordenadas de cuadros
@@ -28,8 +35,12 @@ int startRec3X, startRec3Y, endRec3X, endRec3Y;
 
 //Variables
 bool inMainScreen = true;
+bool inQScreen = false;
 unsigned long touchDebounceRef = 0;
 volatile bool touched = false;
+
+//Sensores
+String caudal = "";
 
 //Objetos
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
@@ -57,11 +68,9 @@ void setup()
   //Inicializar touch
   if (!ts.begin(40))
   {
-    Serial.println("Error al iniciar touch");
   }
   else
   {
-    Serial.println("Touch inicializado");
   }
 
   //Dibujar pantalla principal
@@ -75,12 +84,23 @@ void loop()
 
   //Manejar touch
   handleTouch();
+
+  //Manejar Comunicacion con modulos
+  txRxToModules();
 }
 
 /** Definición de Funciones **/
 void initPins()
 {
   pinMode(LED, OUTPUT);
+
+  //Definir pines de transceiver
+  pinMode(TX_ENABLE, OUTPUT);
+  pinMode(RX_ENABLE, OUTPUT);
+
+  //Inicializar como transmisor
+  digitalWrite(TX_ENABLE, HIGH); //Habilitar TX
+  digitalWrite(RX_ENABLE, HIGH); //Deshabilitar RX
 
   //Pin de interrupcion touch
   pinMode(TOUCH_INT, INPUT_PULLUP);
@@ -100,13 +120,6 @@ void tooglePin()
 
 void drawMainScreen()
 {
-  //Mostrar dimensiones
-  Serial.print("\n\n\n\n\n");
-  Serial.print("Width -> ");
-  Serial.println(tft.width());
-  Serial.print("Height -> ");
-  Serial.println(tft.height());
-
   tft.fillScreen(ILI9341_BLACK);
 
   //Escribir título
@@ -221,11 +234,6 @@ void handleTouch()
       int realY = tft.height() - p.x;
       int realX = p.y;
 
-      //Mostrar datos de coordenada
-      Serial.print("x: ");
-      Serial.print(realX);
-      Serial.print("  y: ");
-      Serial.println(realY);
       touchDebounceRef = millis();
 
       if (inMainScreen)
@@ -234,6 +242,7 @@ void handleTouch()
       }
       else
       {
+        inQScreen = false;
         drawMainScreen();
       }
     }
@@ -269,12 +278,95 @@ void evaluateChoseRect(int x, int y)
   else if (x >= startRec3X && x <= endRec3X &&
            y >= startRec3Y && y <= endRec3Y)
   {
-    tft.fillScreen(ILI9341_YELLOW);
-    tft.setTextColor(ILI9341_BLACK);
-    tft.setTextSize(3);
-    tft.setCursor(tft.width() / 3, (tft.height() / 2) - 8);
-    tft.print("3 L/h");
-
+    drawQScreen();
     inMainScreen = false;
+    inQScreen = true;
+  }
+}
+
+String handleSerial()
+{
+  String message = "";
+
+  if (Serial.available())
+  {
+    while (Serial.available())
+    {
+      char mChar = (char)Serial.read();
+      if (mChar != 0 && mChar != ' ')
+      {
+        message += mChar;
+      }
+      delay(2);
+    }
+  }
+
+  return message;
+}
+
+void drawQScreen()
+{
+  tft.fillScreen(ILI9341_YELLOW);
+  tft.setTextColor(ILI9341_BLACK);
+  tft.setTextSize(3);
+  tft.setCursor(tft.width() / 3, (tft.height() / 2) - 8);
+  tft.print(caudal);
+}
+
+void txRxToModules()
+{
+  //Verdadero para enviar, falso para recibir
+  static bool sendOrReceive = false;
+
+  //Referencia para solicitar datos
+  static unsigned long timeRef;
+
+  if (sendOrReceive)
+  {
+    //Enviar a cada ms
+    if (millis() - timeRef > 30)
+    {
+      //Preparar bits para transmitir
+      digitalWrite(TX_ENABLE, HIGH);
+      digitalWrite(RX_ENABLE, HIGH);
+
+      //Pedir dato a Caudal
+      Serial.print('0');
+      delay(1);
+
+      //Esperar respuesta
+      sendOrReceive = false;
+    }
+  }
+  else
+  {
+    //Preparar bits para recibir
+    digitalWrite(TX_ENABLE, LOW);
+    digitalWrite(RX_ENABLE, LOW);
+
+    //Esperar mensaje
+    String message = handleSerial();
+
+    //Validar si se recibió un mensaje
+    if (message != "")
+    {
+      caudal = message;
+      caudal += " L/h";
+
+      //Si la ventana actual es la de caudal, refrescar
+      if (inQScreen)
+        drawQScreen();
+
+      //Finalizar proceso
+      sendOrReceive = true;
+      timeRef = millis();
+    }
+
+    //Revisar si sucede un timeout
+    if (millis() - timeRef > 1500)
+    {
+      sendOrReceive = true;
+      timeRef = millis();
+    }
   }
 }
