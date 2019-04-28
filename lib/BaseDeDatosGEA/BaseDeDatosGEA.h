@@ -20,9 +20,7 @@ public:
   BaseDeDatosGEA();
   ~BaseDeDatosGEA();
   bool begin();
-  bool actualizarValorGas(int valor);
-  bool actualizarValorElec(double valor, double totalizador);
-  bool actualizarValorAgua(double valor, double totalizador);
+  bool actualizarSensores(int gas, double elec, double agua, double totElec, double totAgua);
   bool agregarRegistroGas(int valor, time_t timeStamp);
 
 private:

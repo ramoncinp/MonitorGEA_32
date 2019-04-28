@@ -20,7 +20,7 @@
 #define RX_ENABLE 13
 
 //Constantes de tiempos
-const int REFRESH_SENSORS_DATA_DELAY = 8000;
+const int REFRESH_SENSORS_DATA_DELAY = 12000;
 
 //Declaración de funciones
 String getCurrentTime();
@@ -56,6 +56,7 @@ volatile bool touched = false;
 //Sensores
 String caudal = "";
 double caudalVal = 500, litros = 10;
+double potInst = 3.24, potAcc = 5.10; 
 int nivelGas = 15;
 
 //Objetos
@@ -307,7 +308,7 @@ void evaluateChoseRect(int x, int y)
     tft.setTextColor(ILI9341_WHITE);
     tft.setTextSize(3);
     tft.setCursor((tft.width() / 2) - 24, (tft.height() / 2) - 8);
-    tft.print(String(nivelGas));
+    tft.print(String(nivelGas) + "%");
 
     inMainScreen = false;
   }
@@ -470,21 +471,15 @@ void handleDbData()
 {
   static int op = 0;
 
-  nivelGas++;
-
   switch (op)
   {
   case 0:
-    db.actualizarValorGas(nivelGas);
+    potInst += 0.10;
+    db.actualizarSensores(++nivelGas, potInst, ++caudalVal, ++potAcc, ++litros);
     op++;
     break;
 
   case 1:
-    db.actualizarValorAgua(caudalVal++, litros++);
-    op++;
-    break;
-
-  case 2:
     db.agregarRegistroGas(nivelGas, getEpochTime());
     op = 0;
     break;

@@ -69,7 +69,7 @@ bool BaseDeDatosGEA::begin()
 {
 }
 
-bool BaseDeDatosGEA::actualizarValorGas(int valor)
+bool BaseDeDatosGEA::actualizarSensores(int gas, double elec, double agua, double totElec, double totAgua)
 {
     if (WiFi.status() == WL_CONNECTED)
     {
@@ -81,47 +81,22 @@ bool BaseDeDatosGEA::actualizarValorGas(int valor)
         JsonObject &root = jsonBuffer.createObject();
 
         //Agregar datos
-        root["valor"] = valor;
+        JsonObject &gasJson = root.createNestedObject("gas");
+        gasJson["valor"] = gas;
+
+        JsonObject &elecJson = root.createNestedObject("electricidad");
+        elecJson["valor"] = elec;
+        elecJson["totalizador"] = totElec;
+
+        JsonObject &aguaJson = root.createNestedObject("agua");
+        aguaJson["valor"] = agua;
+        aguaJson["totalizador"] = totAgua;
+
+        //Almacenar en String
         root.printTo(body);
         
         HTTPClient http;
-
-        http.begin(FIREBASE_URL + "/sensores/gas.json", certificate);
-        int httpCode = http.PUT(body);
-
-        if (httpCode == 200)
-        {
-            http.end();
-            return true;
-        }
-        else
-        {
-            http.end();
-            return false;
-        }
-    }
-    return false;
-}
-
-bool BaseDeDatosGEA::actualizarValorAgua(double valor, double totalizador)
-{
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        //Crear body
-        String body = "";
-
-        //Crear un buffer dinámico
-        DynamicJsonBuffer jsonBuffer;
-        JsonObject &root = jsonBuffer.createObject();
-
-        //Agregar datos
-        root["totalizador"] = totalizador;
-        root["valor"] = valor;
-        root.printTo(body);
-        
-        HTTPClient http;
-
-        http.begin(FIREBASE_URL + "/sensores/agua.json", certificate);
+        http.begin(FIREBASE_URL + "/sensores.json", certificate);
         int httpCode = http.PUT(body);
 
         if (httpCode == 200)
