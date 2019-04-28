@@ -4,12 +4,15 @@
 #include "Adafruit_GFX.h"
 #include "Adafruit_ILI9341.h"
 #include <Adafruit_FT6206.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <time.h>
 
 #define LED 2
 //Pins de LCD
 #define TFT_DC 5
 #define TFT_CS 4
-#define TFT_RST 17
+#define TFT_RST 19
 //Pin interrupcion Touch
 #define TOUCH_INT 25
 //Pines de transceiver
@@ -17,7 +20,12 @@
 #define RX_ENABLE 13
 
 //Declaración de funciones
+String getCurrentTime();
+String handleSerial();
+time_t getEpochTime();
+void connectToWifi();
 void evaluateChoseRect(int x, int y);
+void firebaseRequest();
 void handleTouch();
 void initPins();
 void drawMainScreen();
@@ -25,7 +33,6 @@ void drawQScreen();
 void txRxToModules();
 void tooglePin();
 void testCircles();
-String handleSerial();
 unsigned long testFillScreen();
 
 //Coordenadas de cuadros
@@ -36,7 +43,9 @@ int startRec3X, startRec3Y, endRec3X, endRec3Y;
 //Variables
 bool inMainScreen = true;
 bool inQScreen = false;
+String currentTime;
 unsigned long touchDebounceRef = 0;
+unsigned long epoch;
 volatile bool touched = false;
 
 //Sensores
@@ -75,6 +84,12 @@ void setup()
 
   //Dibujar pantalla principal
   drawMainScreen();
+
+  //Conectarse a WiFi
+  connectToWifi();
+
+  //Conectarse con la base de datos
+  firebaseRequest();
 }
 
 void loop()
@@ -126,7 +141,7 @@ void drawMainScreen()
   tft.setCursor((tft.width() / 3) - 8, 6);
   tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(2);
-  tft.println("Monitor GEA");
+  tft.println("Monitor GEA ");
 
   //Dibujar Elementos
   startRec1X = 6;
@@ -351,7 +366,7 @@ void txRxToModules()
     if (message != "")
     {
       caudal = message;
-      caudal += " L/h";
+      caudal += " L/m";
 
       //Si la ventana actual es la de caudal, refrescar
       if (inQScreen)
@@ -368,5 +383,99 @@ void txRxToModules()
       sendOrReceive = true;
       timeRef = millis();
     }
+  }
+}
+
+void connectToWifi()
+{
+  const char *ssid = "ARRIS-1EC2";
+  const char *password = "17A33538439C84A4";
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.println("Conectando a la red...");
+  }
+
+  Serial.println("Conectado :D!");
+
+  //Configurar reloj
+  //configTime(0, 0, "pool.ntp.org");
+}
+
+void firebaseRequest()
+{
+  const char *root_ca =
+      "-----BEGIN CERTIFICATE-----\n"
+      "MIIEGDCCAwCgAwIBAgIQI+/QKD6ld0Sb9j5ZiOHrwzANBgkqhkiG9w0BAQsFADCB\n"
+      "gTE6MDgGA1UECwwxZ2VuZXJhdGVkIGJ5IEF2YXN0IEFudGl2aXJ1cyBmb3IgU1NM\n"
+      "L1RMUyBzY2FubmluZzEeMBwGA1UECgwVQXZhc3QgV2ViL01haWwgU2hpZWxkMSMw\n"
+      "IQYDVQQDDBpBdmFzdCBXZWIvTWFpbCBTaGllbGQgUm9vdDAeFw0xOTAzMTMyMTMw\n"
+      "NTdaFw0yMDAzMTEyMTMwNTdaMGgxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxp\n"
+      "Zm9ybmlhMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRMwEQYDVQQKEwpHb29nbGUg\n"
+      "TExDMRcwFQYDVQQDEw5maXJlYmFzZWlvLmNvbTCCASIwDQYJKoZIhvcNAQEBBQAD\n"
+      "ggEPADCCAQoCggEBALPLKPeoCQYm8JoHVI/6gZ8KMR4VXYJ7h56gjKv0KmyBgg7E\n"
+      "LLsTe2PtgaouiQFG5nPBr5ctwKCDqoEBcSI8UhiMxsDwkQMXrvff79qTeTG+ZE4G\n"
+      "C3R0I9eu0cO5t3YWJgqVGI2CAzNDjt//IaRIMcRGGELB5Gsbv6HYh5wfBspEOisn\n"
+      "NoIwKyvfFIBUcN26s7A53mIZ9DuXl5CzKevBWbQ4kbhREhzfPadtkgp4zVHt8gRk\n"
+      "rtyvIpEWWY+hEv+TW6jQtw/SdOczWd+OzlIpOkhaIzlYBV3wPEwQUvoRvjJRHvoL\n"
+      "Zl86ElSsGAH4efiFKk1qK8eOf/K7Ux87c409LuUCAwEAAaOBozCBoDAOBgNVHQ8B\n"
+      "Af8EBAMCBaAwEwYDVR0lBAwwCgYIKwYBBQUHAwEwDAYDVR0TAQH/BAIwADAdBgNV\n"
+      "HQ4EFgQUtN2IVe9IOvuzFMbTopbkYtU9hgMwHwYDVR0jBBgwFoAUQFLnnEmlC9Fr\n"
+      "e7ITUsPZj7LT03AwKwYDVR0RBCQwIoIOZmlyZWJhc2Vpby5jb22CECouZmlyZWJh\n"
+      "c2Vpby5jb20wDQYJKoZIhvcNAQELBQADggEBAMPJppLHCVlGNg6NZcSKcVhYK3RX\n"
+      "Xv6oOf6TAu+x3R/85+bsVTWcIUNt7N0DfVWmh524lSB6EFkssnroEVx1PMujgLKd\n"
+      "kHEYzJGA83uf2VFXE3Yw4uKC9smke8eITisAjrA6b/93r6YH5v8994ePrWiCgpq2\n"
+      "pSeH3BEq/+XLswi3V6P6jnnayghxU0re5vEHF1BHTNE1OTIPwwkMyeDiWMtWdgC3\n"
+      "buqmGhQ6e6C0GH9ebWIshN8SAs+dTY6plVrWBV79FDTt6cFjNKuzrDowVKhxETJF\n"
+      "hjOwrPfeTkC2XCOoZntU+7A9c9C8Or+UyWMDPbwD/rulVFqFwfM2yw5qHvI=\n"
+      "-----END CERTIFICATE-----\n";
+
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    Serial.println("Obtener datos de sensores...");
+
+    HTTPClient http;
+
+    http.begin("https://monitorgea.firebaseio.com/sensores.json", root_ca);
+    int httpCode = http.GET();
+
+    if (httpCode > 0)
+    {
+      String payload = http.getString();
+      Serial.println(payload);
+    }
+    else
+    {
+      Serial.println("Error on HTTP request");
+    }
+
+    http.end();
+  }
+}
+
+time_t getEpochTime()
+{
+  time_t now;
+  time(&now);
+
+  return now;
+}
+
+String getCurrentTime()
+{
+  char mTime[7];
+  struct tm timeinfo;
+
+  if (getLocalTime(&timeinfo))
+  {
+    snprintf(mTime, sizeof(mTime), "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    return String(mTime);
+  }
+  else
+  {
+    return "";
   }
 }
