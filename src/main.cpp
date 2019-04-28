@@ -5,8 +5,8 @@
 #include "Adafruit_ILI9341.h"
 #include <Adafruit_FT6206.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
 #include <time.h>
+#include "BaseDeDatosGEA.h"
 
 #define LED 2
 //Pins de LCD
@@ -19,17 +19,21 @@
 #define TX_ENABLE 14
 #define RX_ENABLE 13
 
+//Constantes de tiempos
+const int REFRESH_SENSORS_DATA_DELAY = 8000;
+
 //Declaración de funciones
 String getCurrentTime();
 String handleSerial();
 time_t getEpochTime();
 void connectToWifi();
 void evaluateChoseRect(int x, int y);
-void firebaseRequest();
+void handleDbData();
 void handleTouch();
 void initPins();
 void drawMainScreen();
 void drawQScreen();
+void printCurrentTime(String time);
 void txRxToModules();
 void tooglePin();
 void testCircles();
@@ -44,16 +48,20 @@ int startRec3X, startRec3Y, endRec3X, endRec3Y;
 bool inMainScreen = true;
 bool inQScreen = false;
 String currentTime;
-unsigned long touchDebounceRef = 0;
-unsigned long epoch;
+unsigned long touchDebounceRef;
+unsigned long showCurrentTimeRef;
+unsigned long updaeFirebaseDataRef;
 volatile bool touched = false;
 
 //Sensores
 String caudal = "";
+double caudalVal = 500, litros = 10;
+int nivelGas = 15;
 
 //Objetos
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 Adafruit_FT6206 ts = Adafruit_FT6206();
+BaseDeDatosGEA db;
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 //Funcion para manejar interrupcion externa
@@ -70,6 +78,9 @@ void setup()
   //Inicializar pines
   initPins();
 
+  //Conectarse a WiFi
+  connectToWifi();
+
   //Inicializar LCD
   tft.begin();
   tft.setRotation(1);
@@ -84,12 +95,6 @@ void setup()
 
   //Dibujar pantalla principal
   drawMainScreen();
-
-  //Conectarse a WiFi
-  connectToWifi();
-
-  //Conectarse con la base de datos
-  firebaseRequest();
 }
 
 void loop()
@@ -102,6 +107,21 @@ void loop()
 
   //Manejar Comunicacion con modulos
   txRxToModules();
+
+  //Imprimir la hora actual cada 500 ms
+  if (millis() - showCurrentTimeRef > 500)
+  {
+    showCurrentTimeRef = millis();
+    if (inMainScreen)
+      printCurrentTime(getCurrentTime());
+  }
+
+  //Actualizar datos en firebase
+  if (millis() - updaeFirebaseDataRef > REFRESH_SENSORS_DATA_DELAY)
+  {
+    updaeFirebaseDataRef = millis();
+    handleDbData();
+  }
 }
 
 /** Definición de Funciones **/
@@ -141,7 +161,10 @@ void drawMainScreen()
   tft.setCursor((tft.width() / 3) - 8, 6);
   tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(2);
-  tft.println("Monitor GEA ");
+  tft.print("Monitor GEA");
+
+  //Escribir hora
+  printCurrentTime(getCurrentTime());
 
   //Dibujar Elementos
   startRec1X = 6;
@@ -177,6 +200,7 @@ void drawMainScreen()
   int centerText3X = startRec3X + 28;
   int centerText3Y = centerText1Y;
 
+  tft.setTextColor(ILI9341_WHITE);
   tft.setCursor(centerText1X + 8, centerText1Y);
   tft.println("Gas");
 
@@ -188,6 +212,14 @@ void drawMainScreen()
   tft.println("Agua");
 
   inMainScreen = true;
+}
+
+void printCurrentTime(String time)
+{
+  tft.setCursor(262, 9);
+  tft.setTextSize(1);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.print(time);
 }
 
 unsigned long testFillScreen()
@@ -275,7 +307,7 @@ void evaluateChoseRect(int x, int y)
     tft.setTextColor(ILI9341_WHITE);
     tft.setTextSize(3);
     tft.setCursor((tft.width() / 2) - 24, (tft.height() / 2) - 8);
-    tft.print("15%");
+    tft.print(String(nivelGas));
 
     inMainScreen = false;
   }
@@ -396,64 +428,10 @@ void connectToWifi()
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
-    Serial.println("Conectando a la red...");
   }
-
-  Serial.println("Conectado :D!");
 
   //Configurar reloj
-  //configTime(0, 0, "pool.ntp.org");
-}
-
-void firebaseRequest()
-{
-  const char *root_ca =
-      "-----BEGIN CERTIFICATE-----\n"
-      "MIIEGDCCAwCgAwIBAgIQI+/QKD6ld0Sb9j5ZiOHrwzANBgkqhkiG9w0BAQsFADCB\n"
-      "gTE6MDgGA1UECwwxZ2VuZXJhdGVkIGJ5IEF2YXN0IEFudGl2aXJ1cyBmb3IgU1NM\n"
-      "L1RMUyBzY2FubmluZzEeMBwGA1UECgwVQXZhc3QgV2ViL01haWwgU2hpZWxkMSMw\n"
-      "IQYDVQQDDBpBdmFzdCBXZWIvTWFpbCBTaGllbGQgUm9vdDAeFw0xOTAzMTMyMTMw\n"
-      "NTdaFw0yMDAzMTEyMTMwNTdaMGgxCzAJBgNVBAYTAlVTMRMwEQYDVQQIEwpDYWxp\n"
-      "Zm9ybmlhMRYwFAYDVQQHEw1Nb3VudGFpbiBWaWV3MRMwEQYDVQQKEwpHb29nbGUg\n"
-      "TExDMRcwFQYDVQQDEw5maXJlYmFzZWlvLmNvbTCCASIwDQYJKoZIhvcNAQEBBQAD\n"
-      "ggEPADCCAQoCggEBALPLKPeoCQYm8JoHVI/6gZ8KMR4VXYJ7h56gjKv0KmyBgg7E\n"
-      "LLsTe2PtgaouiQFG5nPBr5ctwKCDqoEBcSI8UhiMxsDwkQMXrvff79qTeTG+ZE4G\n"
-      "C3R0I9eu0cO5t3YWJgqVGI2CAzNDjt//IaRIMcRGGELB5Gsbv6HYh5wfBspEOisn\n"
-      "NoIwKyvfFIBUcN26s7A53mIZ9DuXl5CzKevBWbQ4kbhREhzfPadtkgp4zVHt8gRk\n"
-      "rtyvIpEWWY+hEv+TW6jQtw/SdOczWd+OzlIpOkhaIzlYBV3wPEwQUvoRvjJRHvoL\n"
-      "Zl86ElSsGAH4efiFKk1qK8eOf/K7Ux87c409LuUCAwEAAaOBozCBoDAOBgNVHQ8B\n"
-      "Af8EBAMCBaAwEwYDVR0lBAwwCgYIKwYBBQUHAwEwDAYDVR0TAQH/BAIwADAdBgNV\n"
-      "HQ4EFgQUtN2IVe9IOvuzFMbTopbkYtU9hgMwHwYDVR0jBBgwFoAUQFLnnEmlC9Fr\n"
-      "e7ITUsPZj7LT03AwKwYDVR0RBCQwIoIOZmlyZWJhc2Vpby5jb22CECouZmlyZWJh\n"
-      "c2Vpby5jb20wDQYJKoZIhvcNAQELBQADggEBAMPJppLHCVlGNg6NZcSKcVhYK3RX\n"
-      "Xv6oOf6TAu+x3R/85+bsVTWcIUNt7N0DfVWmh524lSB6EFkssnroEVx1PMujgLKd\n"
-      "kHEYzJGA83uf2VFXE3Yw4uKC9smke8eITisAjrA6b/93r6YH5v8994ePrWiCgpq2\n"
-      "pSeH3BEq/+XLswi3V6P6jnnayghxU0re5vEHF1BHTNE1OTIPwwkMyeDiWMtWdgC3\n"
-      "buqmGhQ6e6C0GH9ebWIshN8SAs+dTY6plVrWBV79FDTt6cFjNKuzrDowVKhxETJF\n"
-      "hjOwrPfeTkC2XCOoZntU+7A9c9C8Or+UyWMDPbwD/rulVFqFwfM2yw5qHvI=\n"
-      "-----END CERTIFICATE-----\n";
-
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    Serial.println("Obtener datos de sensores...");
-
-    HTTPClient http;
-
-    http.begin("https://monitorgea.firebaseio.com/sensores.json", root_ca);
-    int httpCode = http.GET();
-
-    if (httpCode > 0)
-    {
-      String payload = http.getString();
-      Serial.println(payload);
-    }
-    else
-    {
-      Serial.println("Error on HTTP request");
-    }
-
-    http.end();
-  }
+  configTime(0, 0, "pool.ntp.org");
 }
 
 time_t getEpochTime()
@@ -466,16 +444,49 @@ time_t getEpochTime()
 
 String getCurrentTime()
 {
-  char mTime[7];
   struct tm timeinfo;
 
-  if (getLocalTime(&timeinfo))
-  {
-    snprintf(mTime, sizeof(mTime), "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-    return String(mTime);
-  }
-  else
+  if (!getLocalTime(&timeinfo))
   {
     return "";
+  }
+
+  //Ajustar zona horaria
+  for (int i = 0; i < 5; i++)
+  {
+    timeinfo.tm_hour--;
+    if (timeinfo.tm_hour == -1)
+      timeinfo.tm_hour = 23;
+  }
+
+  char timeStringBuff[50];
+  strftime(timeStringBuff, sizeof(timeStringBuff), "%H:%M:%S", &timeinfo);
+
+  String asString(timeStringBuff);
+  return timeStringBuff;
+}
+
+void handleDbData()
+{
+  static int op = 0;
+
+  nivelGas++;
+
+  switch (op)
+  {
+  case 0:
+    db.actualizarValorGas(nivelGas);
+    op++;
+    break;
+
+  case 1:
+    db.actualizarValorAgua(caudalVal++, litros++);
+    op++;
+    break;
+
+  case 2:
+    db.agregarRegistroGas(nivelGas, getEpochTime());
+    op = 0;
+    break;
   }
 }
