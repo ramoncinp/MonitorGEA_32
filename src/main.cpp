@@ -20,7 +20,7 @@
 #define RX_ENABLE 13
 
 //Constantes de tiempos
-const int REFRESH_SENSORS_DATA_DELAY = 12000;
+const int REFRESH_SENSORS_DATA_DELAY = 5 * 60000; //5 minutos
 
 //Declaración de funciones
 String getCurrentTime();
@@ -48,15 +48,18 @@ int startRec3X, startRec3Y, endRec3X, endRec3Y;
 bool inMainScreen = true;
 bool inQScreen = false;
 String currentTime;
+volatile bool touched = false;
+
+//Referencias de tiempo
 unsigned long touchDebounceRef;
 unsigned long showCurrentTimeRef;
 unsigned long updaeFirebaseDataRef;
-volatile bool touched = false;
+unsigned long acumuladorCaudalRef;
 
 //Sensores
 String caudal = "";
-double caudalVal = 500, litros = 10;
-double potInst = 3.24, potAcc = 5.10; 
+float caudalVal = 900, litros = 0;
+float potInst = 0, potAcc = 0;
 int nivelGas = 15;
 
 //Objetos
@@ -121,7 +124,7 @@ void loop()
   if (millis() - updaeFirebaseDataRef > REFRESH_SENSORS_DATA_DELAY)
   {
     updaeFirebaseDataRef = millis();
-    handleDbData();
+    //handleDbData();
   }
 }
 
@@ -223,53 +226,6 @@ void printCurrentTime(String time)
   tft.print(time);
 }
 
-unsigned long testFillScreen()
-{
-  unsigned long start = micros();
-  tft.fillScreen(ILI9341_BLACK);
-  delay(100);
-  tft.fillScreen(ILI9341_RED);
-  delay(100);
-  tft.fillScreen(ILI9341_GREEN);
-  delay(100);
-  tft.fillScreen(ILI9341_BLUE);
-  delay(100);
-  tft.fillScreen(ILI9341_BLACK);
-  delay(100);
-  return micros() - start;
-}
-
-void testCircles()
-{
-  static int radius = 2;
-  static int x = tft.width() / 2;
-  static int y = tft.height() / 2;
-  static bool incrementDecrement = true;
-
-  tft.fillScreen(ILI9341_BLACK);
-  tft.drawCircle(x, y, radius, ILI9341_NAVY);
-
-  if (incrementDecrement)
-  {
-    radius += 3;
-    if (radius > tft.width() / 2)
-    {
-      radius = tft.width() / 2;
-      incrementDecrement = false;
-    }
-  }
-  else
-  {
-    radius -= 3;
-    if (radius < 2)
-    {
-      radius = 2;
-      incrementDecrement = true;
-    }
-  }
-  delay(5);
-}
-
 void handleTouch()
 {
   if (touched && millis() - touchDebounceRef > 200)
@@ -343,6 +299,10 @@ String handleSerial()
       char mChar = (char)Serial.read();
       if (mChar != 0 && mChar != ' ')
       {
+        if (mChar > '9')
+        {
+          mChar = '0';
+        }
         message += mChar;
       }
       delay(2);
@@ -357,12 +317,15 @@ void drawQScreen()
   tft.fillScreen(ILI9341_YELLOW);
   tft.setTextColor(ILI9341_BLACK);
   tft.setTextSize(3);
-  tft.setCursor(tft.width() / 3, (tft.height() / 2) - 8);
-  tft.print(caudal);
+  tft.setCursor(0, (tft.height() / 2) - 16);
+  tft.printf("  %.3f mL/m\n  %.3f L", caudalVal, litros);
 }
 
 void txRxToModules()
 {
+  //Variable que indica el dato que estamos recolectando
+  static int sensorType = 2; //Agua por default
+
   //Verdadero para enviar, falso para recibir
   static bool sendOrReceive = false;
 
@@ -372,14 +335,27 @@ void txRxToModules()
   if (sendOrReceive)
   {
     //Enviar a cada ms
-    if (millis() - timeRef > 30)
+    if (millis() - timeRef > 100)
     {
       //Preparar bits para transmitir
       digitalWrite(TX_ENABLE, HIGH);
       digitalWrite(RX_ENABLE, HIGH);
 
-      //Pedir dato a Caudal
-      Serial.print('0');
+      switch (sensorType)
+      {
+      case 0: //Pedir valor de gas
+        Serial.print('2');
+        break;
+
+      case 1: //Pedir valor de potencia electrica
+        Serial.print('1');
+
+      case 2: //Pedir valor de caudal
+        Serial.print('0');
+
+      default:
+        break;
+      }
       delay(1);
 
       //Esperar respuesta
@@ -398,12 +374,47 @@ void txRxToModules()
     //Validar si se recibió un mensaje
     if (message != "")
     {
-      caudal = message;
-      caudal += " L/m";
+      if (message.indexOf('.') != -1)
+      {
+        //Obtener longitud del mensaje completo
+        int mLenght = message.length();
+        //Obtener indice del punto
+        int pointIdx = message.indexOf('.');
 
-      //Si la ventana actual es la de caudal, refrescar
-      if (inQScreen)
-        drawQScreen();
+        //Recortar a máximo 3 decimales
+        if (mLenght - pointIdx > 4)
+        {
+          message = message.substring(0, pointIdx + 3);
+        }
+      }
+
+      //Evaluar el dato que se espera recibir
+      switch (sensorType)
+      {
+      case 0: //Obtener valor de gas
+        break;
+
+      case 1: //Obtener valor de potencia eléctrica
+        break;
+
+      case 2: //Obtener valor de agua
+        //Acumular a totalizador de litros
+        litros += (caudalVal / 1000.000) * ((millis() - acumuladorCaudalRef) / 60000.000);
+        //Obtener caudal en string
+        caudal = message;
+        //Convertir caudal a float
+        caudalVal = caudal.toFloat();
+        //Si la ventana actual es la de caudal, refrescar
+        if (inQScreen)
+          drawQScreen();
+
+        //Comenzar a contar tiempo de caudal actual
+        acumuladorCaudalRef = millis();
+        break;
+
+      default:
+        break;
+      }
 
       //Finalizar proceso
       sendOrReceive = true;

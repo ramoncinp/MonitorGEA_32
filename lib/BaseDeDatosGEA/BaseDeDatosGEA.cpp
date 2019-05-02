@@ -146,4 +146,4 @@ bool BaseDeDatosGEA::agregarRegistroGas(int valor, time_t timeStamp)
         }
     }
     return false;
-}
+}  
