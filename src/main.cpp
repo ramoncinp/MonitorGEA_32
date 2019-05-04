@@ -32,6 +32,7 @@ void handleDbData();
 void handleTouch();
 void initPins();
 void drawMainScreen();
+void drawGasScreen();
 void drawQScreen();
 void printCurrentTime(String time);
 void txRxToModules();
@@ -47,6 +48,8 @@ int startRec3X, startRec3Y, endRec3X, endRec3Y;
 //Variables
 bool inMainScreen = true;
 bool inQScreen = false;
+bool inGasScreen = false;
+bool inElecScreen = false;
 String currentTime;
 volatile bool touched = false;
 
@@ -58,9 +61,9 @@ unsigned long acumuladorCaudalRef;
 
 //Sensores
 String caudal = "";
-float caudalVal = 900, litros = 0;
+float caudalVal = 0, litros = 0;
 float potInst = 0, potAcc = 0;
-int nivelGas = 15;
+int nivelGas = 0;
 
 //Objetos
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
@@ -150,7 +153,7 @@ void tooglePin()
 {
   static unsigned long timeRef;
 
-  if (millis() - timeRef > 250)
+  if (millis() - timeRef > 500)
   {
     digitalWrite(LED, !digitalRead(LED));
     timeRef = millis();
@@ -247,6 +250,7 @@ void handleTouch()
       else
       {
         inQScreen = false;
+        inGasScreen = false;
         drawMainScreen();
       }
     }
@@ -260,13 +264,10 @@ void evaluateChoseRect(int x, int y)
   if (x >= startRec1X && x <= endRec1X &&
       y >= startRec1Y && y <= endRec1Y)
   {
-    tft.fillScreen(ILI9341_RED);
-    tft.setTextColor(ILI9341_WHITE);
-    tft.setTextSize(3);
-    tft.setCursor((tft.width() / 2) - 24, (tft.height() / 2) - 8);
-    tft.print(String(nivelGas) + "%");
-
+    drawGasScreen();
     inMainScreen = false;
+    inQScreen = false;
+    inGasScreen = true;
   }
   else if (x >= startRec2X && x <= endRec2X &&
            y >= startRec2Y && y <= endRec2Y)
@@ -284,6 +285,7 @@ void evaluateChoseRect(int x, int y)
   {
     drawQScreen();
     inMainScreen = false;
+    inGasScreen = false;
     inQScreen = true;
   }
 }
@@ -312,6 +314,15 @@ String handleSerial()
   return message;
 }
 
+void drawGasScreen()
+{
+  tft.fillScreen(ILI9341_RED);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(3);
+  tft.setCursor((tft.width() / 2) - 24, (tft.height() / 2) - 8);
+  tft.printf("%d%c", nivelGas, '%');
+}
+
 void drawQScreen()
 {
   tft.fillScreen(ILI9341_YELLOW);
@@ -335,7 +346,7 @@ void txRxToModules()
   if (sendOrReceive)
   {
     //Enviar a cada ms
-    if (millis() - timeRef > 100)
+    if (millis() - timeRef > 50)
     {
       //Preparar bits para transmitir
       digitalWrite(TX_ENABLE, HIGH);
@@ -374,6 +385,7 @@ void txRxToModules()
     //Validar si se recibió un mensaje
     if (message != "")
     {
+      /*
       if (message.indexOf('.') != -1)
       {
         //Obtener longitud del mensaje completo
@@ -386,12 +398,22 @@ void txRxToModules()
         {
           message = message.substring(0, pointIdx + 3);
         }
-      }
+      }*/
 
       //Evaluar el dato que se espera recibir
       switch (sensorType)
       {
       case 0: //Obtener valor de gas
+        //Convertir valor
+        nivelGas = message.toInt();
+        //Mostrar valor si esta en pantalla de gas
+        if (inGasScreen)
+        {
+          drawGasScreen();
+        }
+
+        //Cambiar a pedir agua
+        sensorType = 2;
         break;
 
       case 1: //Obtener valor de potencia eléctrica
@@ -410,6 +432,8 @@ void txRxToModules()
 
         //Comenzar a contar tiempo de caudal actual
         acumuladorCaudalRef = millis();
+        //Cambiar a pedir gas
+        sensorType = 0;
         break;
 
       default:
@@ -424,6 +448,20 @@ void txRxToModules()
     //Revisar si sucede un timeout
     if (millis() - timeRef > 1500)
     {
+      switch (sensorType)
+      {
+      case 0:
+        sensorType = 2;
+        break;
+
+      case 2:
+        sensorType = 0;
+        break;
+      
+      default:
+        break;
+      }
+
       sendOrReceive = true;
       timeRef = millis();
     }
@@ -486,7 +524,7 @@ void handleDbData()
   {
   case 0:
     potInst += 0.10;
-    db.actualizarSensores(++nivelGas, potInst, ++caudalVal, ++potAcc, ++litros);
+    db.actualizarSensores(nivelGas, potInst, ++caudalVal, ++potAcc, ++litros);
     op++;
     break;
 
