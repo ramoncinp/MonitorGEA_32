@@ -8,7 +8,6 @@
 #include <time.h>
 #include <ArduinoOTA.h>
 #include "BaseDeDatosGEA.h"
-#include "MemoryManager.h"
 
 #define LED 2
 //Pins de LCD
@@ -42,9 +41,8 @@ void drawMainScreen();
 void drawGasScreen();
 void drawQScreen();
 void drawElecScreen();
-void getMemoryData();
 void printCurrentTime(String time);
-void saveData();
+void recibirValor();
 void setGasData();
 void setElecData();
 void setAguaData();
@@ -88,7 +86,6 @@ int nivelGas = 0;
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 Adafruit_FT6206 ts = Adafruit_FT6206();
 BaseDeDatosGEA db;
-MemoryManager memoryManager;
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 //Funcion para manejar interrupcion externa
@@ -108,9 +105,6 @@ void setup()
   //Inicializar pines
   initPins();
 
-  //Inicializar manejador de memoria
-  memoryManager.begin();
-
   //Conectarse a WiFi
   connectToWifi();
 
@@ -128,9 +122,6 @@ void setup()
 
   //Dibujar pantalla principal
   drawMainScreen();
-
-  //Obtener datos
-  getMemoryData();
 }
 
 void loop()
@@ -143,10 +134,7 @@ void loop()
 
   //Manejar Comunicacion con modulos
   txRxToModules();
-
-  //Evaluar el guardar datos
-  //handleSaveMemoryData();
-
+  
   //Imprimir la hora actual cada 500 ms
   if (millis() - showCurrentTimeRef > 500)
   {
@@ -193,8 +181,8 @@ void initPins()
   pinMode(RX_ENABLE, OUTPUT);
 
   //Inicializar como transmisor
-  digitalWrite(TX_ENABLE, HIGH); //Habilitar TX
-  digitalWrite(RX_ENABLE, HIGH); //Deshabilitar RX
+  digitalWrite(TX_ENABLE, LOW); //Habilitar TX
+  digitalWrite(RX_ENABLE, LOW); //Deshabilitar RX
 
   //Pin de interrupcion touch
   pinMode(TOUCH_INT, INPUT_PULLUP);
@@ -445,7 +433,7 @@ void drawElecScreen()
 void txRxToModules()
 {
   //Variable que indica el dato que estamos recolectando
-  static int sensorType = 2; //Agua por default
+  static int sensorType = 0; //Gas por default
 
   //Verdadero para enviar, falso para recibir
   static bool sendOrReceive = true;
@@ -456,7 +444,7 @@ void txRxToModules()
   if (sendOrReceive)
   {
     //Enviar a cada ms
-    if (millis() - timeRef > 50)
+    if (millis() - timeRef > 80)
     {
       //Preparar bits para transmitir
       digitalWrite(TX_ENABLE, HIGH);
@@ -466,7 +454,6 @@ void txRxToModules()
       {
       case 0: //Pedir valor de gas
         Serial2.print('2');
-        Serial.println("Pidiendo valor de gas");
         break;
 
       case 1: //Pedir valor de potencia electrica
@@ -475,12 +462,12 @@ void txRxToModules()
 
       case 2: //Pedir valor de caudal
         Serial2.print('0');
-        Serial.println("Pidiendo valor de caudal");
         break;
 
       default:
         break;
       }
+
       delay(1);
 
       //Esperar respuesta
@@ -503,22 +490,18 @@ void txRxToModules()
       switch (sensorType)
       {
       case 0: //Obtener valor de gas
-        Serial.print("Llego dato de gas -> ");
-        Serial.println(message);
-
+      
         //Valor entrante
         int nuevoValor;
         nuevoValor = message.toInt();
 
         if (nuevoValor >= 0 && nuevoValor <= 100)
         {
-          //Evaluar si es diferente al actual
+          /*//Evaluar si es diferente al actual
           if (nuevoValor != nivelGas)
           {
             Serial.println("Cambio valor de gas, guardar...");
-            //Guardar en memoria el nuevo valor
-            memoryManager.saveData(nuevoValor, NIVEL_GAS_ADDR);
-          }
+          }*/
         }
 
         //Convertir valor
@@ -534,7 +517,7 @@ void txRxToModules()
         }
 
         //Cambiar a pedir agua
-        sensorType = 2;
+        sensorType = 0;
         break;
 
       case 1: //Obtener valor de potencia eléctrica
@@ -558,9 +541,6 @@ void txRxToModules()
         break;
 
       case 2: //Obtener valor de agua
-        Serial.print("Llego dato de agua -> ");
-        Serial.println(message);
-
         //Acumular a totalizador de litros
         litros += (caudalVal / 1000.000) * ((millis() - acumuladorCaudalRef) / 60000.000);
         //Convertir caudal a float
@@ -591,8 +571,6 @@ void txRxToModules()
     //Revisar si sucede un timeout
     if (millis() - timeRef > 3000)
     {
-      Serial.println("Time out!");
-
       switch (sensorType)
       {
       case 0:
@@ -623,14 +601,11 @@ void handleSaveMemoryData()
     if (caudalVal > 0)
     {
       //Guardar si hay caudal
-      memoryManager.saveData(litros, LITROS_ADDR);
     }
 
     //Evaluar potencia instantánea
     if (potInst > 0)
     {
-      //Si hay consumo de potencia actual, guardar
-      memoryManager.saveData(potAcc, POTENCIA_ADDR);
     }
 
     //El nivel de gas se almacena a cada cambio
@@ -644,15 +619,12 @@ void connectToWifi()
   const char *ssid = "ARRIS-1EC2";
   const char *password = "17A33538439C84A4";
 
-  Serial.println("Conectando a WiFi");
   WiFi.begin(ssid, password);
 
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
   }
-
-  Serial.println("Conectado a WiFi!");
 
   //Configurar reloj
   configTime(0, 0, "pool.ntp.org");
@@ -701,16 +673,6 @@ String getCurrentTime()
 
   String asString(timeStringBuff);
   return timeStringBuff;
-}
-
-//Obtener los valores almacenados en memoria
-void getMemoryData()
-{
-  litros = memoryManager.getData(LITROS_ADDR);
-  litrosRef = memoryManager.getData(LITROS_REF_ADDR);
-  potAcc = memoryManager.getData(POTENCIA_ADDR);
-  potAccRef = memoryManager.getData(POTENCIA_REF_ADDR);
-  nivelGas = memoryManager.getData(NIVEL_GAS_ADDR);
 }
 
 //Actualizar valores de base de datos
