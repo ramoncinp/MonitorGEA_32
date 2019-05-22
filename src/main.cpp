@@ -34,6 +34,7 @@ time_t getEpochTime();
 void connectToWifi();
 void evaluateChoseRect(int x, int y);
 void handleDbData();
+void handleSaveMemoryData();
 void handleTouch();
 void initOTA();
 void initPins();
@@ -41,7 +42,9 @@ void drawMainScreen();
 void drawGasScreen();
 void drawQScreen();
 void drawElecScreen();
+void getMemoryData();
 void printCurrentTime(String time);
+void saveData();
 void setGasData();
 void setElecData();
 void setAguaData();
@@ -77,15 +80,15 @@ unsigned long acumuladorPotenciaRef;
 unsigned long mostrarValor;
 
 //Sensores
-String caudal = "";
-float caudalVal = 0, litros = 0;
-float potInst = 40, potAcc = 0;
+float caudalVal = 0, litros = 0, litrosRef = 0;
+float potInst = 0, potAcc = 0, potAccRef = 0;
 int nivelGas = 0;
 
 //Objetos
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 Adafruit_FT6206 ts = Adafruit_FT6206();
 BaseDeDatosGEA db;
+MemoryManager memoryManager;
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 //Funcion para manejar interrupcion externa
@@ -105,6 +108,9 @@ void setup()
   //Inicializar pines
   initPins();
 
+  //Inicializar manejador de memoria
+  memoryManager.begin();
+
   //Conectarse a WiFi
   connectToWifi();
 
@@ -122,6 +128,9 @@ void setup()
 
   //Dibujar pantalla principal
   drawMainScreen();
+
+  //Obtener datos
+  getMemoryData();
 }
 
 void loop()
@@ -134,6 +143,9 @@ void loop()
 
   //Manejar Comunicacion con modulos
   txRxToModules();
+
+  //Evaluar el guardar datos
+  //handleSaveMemoryData();
 
   //Imprimir la hora actual cada 500 ms
   if (millis() - showCurrentTimeRef > 500)
@@ -150,7 +162,7 @@ void loop()
     //handleDbData();
   }
 
-  if (millis() - acumuladorPotenciaRef > 1500)
+  /*if (millis() - acumuladorPotenciaRef > 2000)
   {
     potAcc += (potInst * (millis() - acumuladorPotenciaRef)) / 3600000.000;
 
@@ -163,19 +175,8 @@ void loop()
       setElecData();
     }
 
+    //Tomar referencia
     acumuladorPotenciaRef = millis();
-  }
-
-  /*
-  //Mostrar valor
-  if (millis() - mostrarValor > 2000)
-  {
-    unsigned int mValor = 300.549;
-    String hexString = String(mValor, HEX);
-    Serial.print("El valor -> ");
-    Serial.println(hexString);
-
-    mostrarValor = millis();
   }*/
 
   //Manejar OTA
@@ -447,7 +448,7 @@ void txRxToModules()
   static int sensorType = 2; //Agua por default
 
   //Verdadero para enviar, falso para recibir
-  static bool sendOrReceive = false;
+  static bool sendOrReceive = true;
 
   //Referencia para solicitar datos
   static unsigned long timeRef;
@@ -465,13 +466,17 @@ void txRxToModules()
       {
       case 0: //Pedir valor de gas
         Serial2.print('2');
+        Serial.println("Pidiendo valor de gas");
         break;
 
       case 1: //Pedir valor de potencia electrica
         Serial2.print('@');
+        break;
 
       case 2: //Pedir valor de caudal
         Serial2.print('0');
+        Serial.println("Pidiendo valor de caudal");
+        break;
 
       default:
         break;
@@ -498,9 +503,26 @@ void txRxToModules()
       switch (sensorType)
       {
       case 0: //Obtener valor de gas
-        Serial.println("Llego dato de gas");
+        Serial.print("Llego dato de gas -> ");
+        Serial.println(message);
+
+        //Valor entrante
+        int nuevoValor;
+        nuevoValor = message.toInt();
+
+        if (nuevoValor >= 0 && nuevoValor <= 100)
+        {
+          //Evaluar si es diferente al actual
+          if (nuevoValor != nivelGas)
+          {
+            Serial.println("Cambio valor de gas, guardar...");
+            //Guardar en memoria el nuevo valor
+            memoryManager.saveData(nuevoValor, NIVEL_GAS_ADDR);
+          }
+        }
+
         //Convertir valor
-        nivelGas = message.toInt();
+        nivelGas = nuevoValor;
         //Mostrar valor si esta en pantalla de gas
         if (inGasScreen)
         {
@@ -513,7 +535,6 @@ void txRxToModules()
 
         //Cambiar a pedir agua
         sensorType = 2;
-
         break;
 
       case 1: //Obtener valor de potencia eléctrica
@@ -537,12 +558,13 @@ void txRxToModules()
         break;
 
       case 2: //Obtener valor de agua
+        Serial.print("Llego dato de agua -> ");
+        Serial.println(message);
+
         //Acumular a totalizador de litros
         litros += (caudalVal / 1000.000) * ((millis() - acumuladorCaudalRef) / 60000.000);
-        //Obtener caudal en string
-        caudal = message;
         //Convertir caudal a float
-        caudalVal = caudal.toFloat();
+        caudalVal = message.toFloat();
         //Si la ventana actual es la de caudal, refrescar
         if (inQScreen)
         {
@@ -559,9 +581,6 @@ void txRxToModules()
         sensorType = 0;
 
         break;
-
-      default:
-        break;
       }
 
       //Finalizar proceso
@@ -570,8 +589,10 @@ void txRxToModules()
     }
 
     //Revisar si sucede un timeout
-    if (millis() - timeRef > 1500)
+    if (millis() - timeRef > 3000)
     {
+      Serial.println("Time out!");
+
       switch (sensorType)
       {
       case 0:
@@ -589,6 +610,32 @@ void txRxToModules()
       sendOrReceive = true;
       timeRef = millis();
     }
+  }
+}
+
+void handleSaveMemoryData()
+{
+  static unsigned long timeRef;
+
+  if (millis() - timeRef > 60000)
+  {
+    //Evaluar caudal
+    if (caudalVal > 0)
+    {
+      //Guardar si hay caudal
+      memoryManager.saveData(litros, LITROS_ADDR);
+    }
+
+    //Evaluar potencia instantánea
+    if (potInst > 0)
+    {
+      //Si hay consumo de potencia actual, guardar
+      memoryManager.saveData(potAcc, POTENCIA_ADDR);
+    }
+
+    //El nivel de gas se almacena a cada cambio
+    //Tomar referencia de tiempo
+    timeRef = millis();
   }
 }
 
@@ -656,6 +703,17 @@ String getCurrentTime()
   return timeStringBuff;
 }
 
+//Obtener los valores almacenados en memoria
+void getMemoryData()
+{
+  litros = memoryManager.getData(LITROS_ADDR);
+  litrosRef = memoryManager.getData(LITROS_REF_ADDR);
+  potAcc = memoryManager.getData(POTENCIA_ADDR);
+  potAccRef = memoryManager.getData(POTENCIA_REF_ADDR);
+  nivelGas = memoryManager.getData(NIVEL_GAS_ADDR);
+}
+
+//Actualizar valores de base de datos
 void handleDbData()
 {
   static int op = 0;
