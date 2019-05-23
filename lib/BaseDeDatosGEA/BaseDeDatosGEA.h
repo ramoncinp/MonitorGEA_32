@@ -19,7 +19,7 @@ class BaseDeDatosGEA
 public:
   BaseDeDatosGEA();
   ~BaseDeDatosGEA();
-  bool begin();
+  String begin();
   bool actualizarSensores(int gas, double elec, double agua, double totElec, double totAgua);
   bool agregarRegistroGas(int valor, time_t timeStamp);
 

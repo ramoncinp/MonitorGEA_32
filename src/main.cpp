@@ -31,12 +31,15 @@ String handleSerial();
 time_t getEpochTime();
 void connectToWifi();
 void evaluateChoseRect(int x, int y);
+void getBdData();
 void handleDbData();
 void handleTouch();
 void initPins();
+void drawLoadingScreen();
 void drawMainScreen();
 void drawGasScreen();
 void drawQScreen();
+void drawElecScreen();
 void printCurrentTime(String time);
 void txRxToModules();
 void tooglePin();
@@ -91,12 +94,18 @@ void setup()
   //Inicializar pines
   initPins();
 
-  //Conectarse a WiFi
-  connectToWifi();
-
   //Inicializar LCD
   tft.begin();
   tft.setRotation(1);
+
+  //Mostrar pantalla de "Cargando..."
+  drawLoadingScreen();
+
+  //Conectarse a WiFi
+  connectToWifi();
+
+  //Obtener datos iniciales
+  getBdData();
 
   //Inicializar touch
   if (!ts.begin(40))
@@ -153,6 +162,30 @@ void initPins()
   //Pin de interrupcion touch
   pinMode(TOUCH_INT, INPUT_PULLUP);
   attachInterrupt(TOUCH_INT, handleTouchInterrupt, FALLING);
+}
+
+void getBdData()
+{
+  String mData;
+
+  // Obtener string de los datos
+  mData = db.begin();
+
+  if (mData != "")
+  {
+    //Crear un buffer dinámico
+    DynamicJsonBuffer jsonBuffer;
+    JsonObject& root = jsonBuffer.parseObject(mData);
+
+    if (!root.success())
+    {
+      return;
+    }
+
+    //Inicializar valores
+    litros = root["agua"]["valor_actual"];
+    potAcc = root["electricidad"]["valor_actual"];
+  }
 }
 
 void tooglePin()
@@ -257,6 +290,7 @@ void handleTouch()
       {
         inQScreen = false;
         inGasScreen = false;
+        inElecScreen = false;
         drawMainScreen();
       }
     }
@@ -273,18 +307,18 @@ void evaluateChoseRect(int x, int y)
     drawGasScreen();
     inMainScreen = false;
     inQScreen = false;
+    inElecScreen = false;
     inGasScreen = true;
   }
   else if (x >= startRec2X && x <= endRec2X &&
            y >= startRec2Y && y <= endRec2Y)
   {
-    tft.fillScreen(ILI9341_GREEN);
-    tft.setTextColor(ILI9341_WHITE);
-    tft.setTextSize(3);
-    tft.setCursor(tft.width() / 3, (tft.height() / 2) - 8);
-    tft.print("1 kW/h");
+    drawElecScreen();
 
     inMainScreen = false;
+    inGasScreen = false;
+    inQScreen = false;
+    inElecScreen = true;
   }
   else if (x >= startRec3X && x <= endRec3X &&
            y >= startRec3Y && y <= endRec3Y)
@@ -292,6 +326,7 @@ void evaluateChoseRect(int x, int y)
     drawQScreen();
     inMainScreen = false;
     inGasScreen = false;
+    inElecScreen = false;
     inQScreen = true;
   }
 }
@@ -320,6 +355,15 @@ String handleSerial()
   return message;
 }
 
+void drawLoadingScreen()
+{
+  tft.fillScreen(ILI9341_WHITE);
+  tft.setTextColor(ILI9341_BLACK, ILI9341_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(0, (tft.height() / 2) - 16);
+  tft.print("  Obteniendo datos...");
+}
+
 void drawGasScreen()
 {
   tft.fillScreen(ILI9341_RED);
@@ -336,6 +380,15 @@ void drawQScreen()
   tft.setTextSize(3);
   tft.setCursor(0, (tft.height() / 2) - 16);
   tft.printf("  %.3f mL/m\n  %.3f L", caudalVal, litros);
+}
+
+void drawElecScreen()
+{
+  tft.fillScreen(ILI9341_GREEN);
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setTextSize(3);
+  tft.setCursor(0, (tft.height() / 2) - 16);
+  tft.printf("  %.3f W\n  %.3f kW/h", potInst, potAcc);
 }
 
 void txRxToModules()
@@ -365,10 +418,12 @@ void txRxToModules()
         break;
 
       case 1: //Pedir valor de potencia electrica
-        Serial2.print('1');
+        Serial2.print('@');
+        break;
 
       case 2: //Pedir valor de caudal
         Serial2.print('0');
+        break;
 
       default:
         break;
@@ -411,6 +466,8 @@ void txRxToModules()
       case 0: //Obtener valor de gas
         //Convertir valor
         nivelGas = message.toInt();
+        if (nivelGas > 100)
+          nivelGas = 0;
         //Mostrar valor si esta en pantalla de gas
         if (inGasScreen)
         {
@@ -418,10 +475,18 @@ void txRxToModules()
         }
 
         //Cambiar a pedir agua
-        sensorType = 2;
+        sensorType = 1;
         break;
 
       case 1: //Obtener valor de potencia eléctrica
+        //Convertir valor a float
+        potInst = message.toFloat();
+        //Evaluar si esta en la pantalla de potencia
+        if (inElecScreen)
+        {
+          drawElecScreen();
+        }
+        sensorType = 2;
         break;
 
       case 2: //Obtener valor de agua
@@ -456,13 +521,17 @@ void txRxToModules()
       switch (sensorType)
       {
       case 0:
+        sensorType = 1;
+        break;
+
+      case 1:
         sensorType = 2;
         break;
 
       case 2:
         sensorType = 0;
         break;
-      
+
       default:
         break;
       }
