@@ -6,7 +6,6 @@
 #include <Adafruit_FT6206.h>
 #include <WiFi.h>
 #include <time.h>
-#include <ArduinoOTA.h>
 #include "BaseDeDatosGEA.h"
 
 #define LED 2
@@ -20,8 +19,8 @@
 #define TX_ENABLE 14
 #define RX_ENABLE 13
 //Pines de Serial2
-#define TXD2 16
-#define RXD2 17
+#define TXD2 17
+#define RXD2 16
 
 //Constantes de tiempos
 const int REFRESH_SENSORS_DATA_DELAY = 5 * 60000; //5 minutos
@@ -33,19 +32,12 @@ time_t getEpochTime();
 void connectToWifi();
 void evaluateChoseRect(int x, int y);
 void handleDbData();
-void handleSaveMemoryData();
 void handleTouch();
-void initOTA();
 void initPins();
 void drawMainScreen();
 void drawGasScreen();
 void drawQScreen();
-void drawElecScreen();
 void printCurrentTime(String time);
-void recibirValor();
-void setGasData();
-void setElecData();
-void setAguaData();
 void txRxToModules();
 void tooglePin();
 void testCircles();
@@ -55,11 +47,6 @@ unsigned long testFillScreen();
 int startRec1X, startRec1Y, endRec1X, endRec1Y;
 int startRec2X, startRec2Y, endRec2X, endRec2Y;
 int startRec3X, startRec3Y, endRec3X, endRec3Y;
-
-//Coordenadas de datos de sensores en pantalla principal
-int startXGasData, startYGasData;
-int startXElecData, startYElecData;
-int startXAguaData, startYAguaData;
 
 //Variables
 bool inMainScreen = true;
@@ -74,12 +61,11 @@ unsigned long touchDebounceRef;
 unsigned long showCurrentTimeRef;
 unsigned long updaeFirebaseDataRef;
 unsigned long acumuladorCaudalRef;
-unsigned long acumuladorPotenciaRef;
-unsigned long mostrarValor;
 
 //Sensores
-float caudalVal = 0, litros = 0, litrosRef = 0;
-float potInst = 0, potAcc = 0, potAccRef = 0;
+String caudal = "";
+float caudalVal = 0, litros = 0;
+float potInst = 0, potAcc = 0;
 int nivelGas = 0;
 
 //Objetos
@@ -134,7 +120,7 @@ void loop()
 
   //Manejar Comunicacion con modulos
   txRxToModules();
-  
+
   //Imprimir la hora actual cada 500 ms
   if (millis() - showCurrentTimeRef > 500)
   {
@@ -149,26 +135,6 @@ void loop()
     updaeFirebaseDataRef = millis();
     //handleDbData();
   }
-
-  /*if (millis() - acumuladorPotenciaRef > 2000)
-  {
-    potAcc += (potInst * (millis() - acumuladorPotenciaRef)) / 3600000.000;
-
-    if (inElecScreen)
-    {
-      drawElecScreen();
-    }
-    else if (inMainScreen)
-    {
-      setElecData();
-    }
-
-    //Tomar referencia
-    acumuladorPotenciaRef = millis();
-  }*/
-
-  //Manejar OTA
-  ArduinoOTA.handle();
 }
 
 /** Definición de Funciones **/
@@ -181,8 +147,8 @@ void initPins()
   pinMode(RX_ENABLE, OUTPUT);
 
   //Inicializar como transmisor
-  digitalWrite(TX_ENABLE, LOW); //Habilitar TX
-  digitalWrite(RX_ENABLE, LOW); //Deshabilitar RX
+  digitalWrite(TX_ENABLE, HIGH); //Habilitar TX
+  digitalWrite(RX_ENABLE, HIGH); //Deshabilitar RX
 
   //Pin de interrupcion touch
   pinMode(TOUCH_INT, INPUT_PULLUP);
@@ -213,100 +179,52 @@ void drawMainScreen()
   //Escribir hora
   printCurrentTime(getCurrentTime());
 
-  //Obtener coordenadas
-  //Rectangulos
+  //Dibujar Elementos
   startRec1X = 6;
   startRec1Y = 28;
   endRec1X = startRec1X + (tft.width() - 18) / 3;
   endRec1Y = startRec1Y + tft.height() - 36;
+  tft.fillRect(startRec1X, startRec1Y, (tft.width() - 18) / 3, tft.height() - 36, ILI9341_RED);
+  tft.drawRect(startRec1X, startRec1Y, (tft.width() - 18) / 3, tft.height() - 36, ILI9341_WHITE);
 
   startRec2X = endRec1X + 6;
   startRec2Y = 28;
   endRec2X = startRec2X + (tft.width() - 18) / 3;
   endRec2Y = startRec2Y + tft.height() - 36;
+  tft.fillRect(startRec2X, startRec1Y, (tft.width() - 18) / 3, tft.height() - 36, ILI9341_GREEN);
+  tft.drawRect(startRec2X, startRec1Y, (tft.width() - 18) / 3, tft.height() - 36, ILI9341_WHITE);
 
   startRec3X = endRec2X + 6;
   startRec3Y = 28;
   endRec3X = startRec3X + (tft.width() - 18) / 3;
   endRec3Y = startRec3Y + tft.height() - 36;
-
-  //Titulos de variables
-  int centerText1X = startRec1X + 28;
-  int centerText1Y = 36;
-
-  int centerText2X = startRec2X + 28;
-  int centerText2Y = 36;
-
-  int centerText3X = startRec3X + 28;
-  int centerText3Y = 36;
-
-  //Valores de los sensores
-  startXGasData = startRec1X + 8;
-  startYGasData = startRec1Y + 80;
-  startXElecData = startRec2X + 8;
-  startYElecData = startRec2Y + 80;
-  startXAguaData = startRec3X + 8;
-  startYAguaData = startRec3Y + 80;
-
-  //Dibujar Rectangulos
-  tft.fillRect(startRec1X, startRec1Y, (tft.width() - 18) / 3, tft.height() - 36, ILI9341_RED);
-  tft.drawRect(startRec1X, startRec1Y, (tft.width() - 18) / 3, tft.height() - 36, ILI9341_WHITE);
-
-  tft.fillRect(startRec2X, startRec1Y, (tft.width() - 18) / 3, tft.height() - 36, ILI9341_GREEN);
-  tft.drawRect(startRec2X, startRec1Y, (tft.width() - 18) / 3, tft.height() - 36, ILI9341_WHITE);
-
   tft.fillRect(startRec3X, startRec3Y, (tft.width() - 18) / 3, tft.height() - 36, ILI9341_YELLOW);
   tft.drawRect(startRec3X, startRec3Y, (tft.width() - 18) / 3, tft.height() - 36, ILI9341_WHITE);
 
-  //Dibujar titulos
-  tft.setTextSize(2);
+  //Dibujar textos
+  tft.setTextSize(1);
+
+  int centerText1X = startRec1X + 28;
+  int centerText1Y = (tft.height() / 2) + 8;
+
+  int centerText2X = startRec2X + 28;
+  int centerText2Y = centerText1Y;
+
+  int centerText3X = startRec3X + 28;
+  int centerText3Y = centerText1Y;
+
   tft.setTextColor(ILI9341_WHITE);
-  tft.setCursor(centerText1X, centerText1Y);
+  tft.setCursor(centerText1X + 8, centerText1Y);
   tft.println("Gas");
 
-  tft.setCursor(centerText2X, centerText2Y);
+  tft.setCursor(centerText2X + 8, centerText2Y);
   tft.println("Elec.");
 
   tft.setTextColor(ILI9341_BLACK);
-  tft.setCursor(centerText3X, centerText3Y);
+  tft.setCursor(centerText3X + 8, centerText3Y);
   tft.println("Agua");
 
-  //Dibujar valores de sensores
-  setGasData();
-  setElecData();
-  setAguaData();
-
   inMainScreen = true;
-}
-
-void setGasData()
-{
-  tft.setTextSize(2);
-  tft.setTextColor(ILI9341_WHITE, ILI9341_RED);
-  tft.setCursor(startXGasData, startYGasData);
-  tft.printf("%d%c", nivelGas, '%');
-  tft.setCursor(startXGasData, startYGasData + 16);
-  tft.printf("%c%d", '$', 500);
-}
-
-void setElecData()
-{
-  tft.setTextSize(2);
-  tft.setTextColor(ILI9341_WHITE, ILI9341_GREEN);
-  tft.setCursor(startXElecData, startYElecData);
-  tft.printf("%dkW/h", (int)potAcc);
-  tft.setCursor(startXElecData, startYElecData + 16);
-  tft.printf("%c%d", '$', 224);
-}
-
-void setAguaData()
-{
-  tft.setTextSize(2);
-  tft.setTextColor(ILI9341_BLACK, ILI9341_YELLOW);
-  tft.setCursor(startXAguaData, startYAguaData);
-  tft.printf("%dL", (int)litros);
-  tft.setCursor(startXAguaData, startYAguaData + 16);
-  tft.printf("%c%d", '$', 149);
 }
 
 void printCurrentTime(String time)
@@ -339,7 +257,6 @@ void handleTouch()
       {
         inQScreen = false;
         inGasScreen = false;
-        inElecScreen = false;
         drawMainScreen();
       }
     }
@@ -356,17 +273,18 @@ void evaluateChoseRect(int x, int y)
     drawGasScreen();
     inMainScreen = false;
     inQScreen = false;
-    inElecScreen = false;
     inGasScreen = true;
   }
   else if (x >= startRec2X && x <= endRec2X &&
            y >= startRec2Y && y <= endRec2Y)
   {
-    drawElecScreen();
+    tft.fillScreen(ILI9341_GREEN);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.setTextSize(3);
+    tft.setCursor(tft.width() / 3, (tft.height() / 2) - 8);
+    tft.print("1 kW/h");
+
     inMainScreen = false;
-    inGasScreen = false;
-    inQScreen = false;
-    inElecScreen = true;
   }
   else if (x >= startRec3X && x <= endRec3X &&
            y >= startRec3Y && y <= endRec3Y)
@@ -374,7 +292,6 @@ void evaluateChoseRect(int x, int y)
     drawQScreen();
     inMainScreen = false;
     inGasScreen = false;
-    inElecScreen = false;
     inQScreen = true;
   }
 }
@@ -385,6 +302,7 @@ String handleSerial()
 
   if (Serial2.available())
   {
+    delay(20);
     while (Serial2.available())
     {
       char mChar = (char)Serial2.read();
@@ -396,7 +314,6 @@ String handleSerial()
         }
         message += mChar;
       }
-      delay(2);
     }
   }
 
@@ -421,22 +338,13 @@ void drawQScreen()
   tft.printf("  %.3f mL/m\n  %.3f L", caudalVal, litros);
 }
 
-void drawElecScreen()
-{
-  tft.fillScreen(ILI9341_GREEN);
-  tft.setTextColor(ILI9341_WHITE);
-  tft.setTextSize(3);
-  tft.setCursor(0, (tft.height() / 2) - 16);
-  tft.printf("  %.3f W\n  %.3f kW/h", potInst, potAcc);
-}
-
 void txRxToModules()
 {
   //Variable que indica el dato que estamos recolectando
-  static int sensorType = 0; //Gas por default
+  static int sensorType = 2; //Agua por default
 
   //Verdadero para enviar, falso para recibir
-  static bool sendOrReceive = true;
+  static bool sendOrReceive = false;
 
   //Referencia para solicitar datos
   static unsigned long timeRef;
@@ -444,7 +352,7 @@ void txRxToModules()
   if (sendOrReceive)
   {
     //Enviar a cada ms
-    if (millis() - timeRef > 80)
+    if (millis() - timeRef > 50)
     {
       //Preparar bits para transmitir
       digitalWrite(TX_ENABLE, HIGH);
@@ -457,17 +365,14 @@ void txRxToModules()
         break;
 
       case 1: //Pedir valor de potencia electrica
-        Serial2.print('@');
-        break;
+        Serial2.print('1');
 
       case 2: //Pedir valor de caudal
         Serial2.print('0');
-        break;
 
       default:
         break;
       }
-
       delay(1);
 
       //Esperar respuesta
@@ -486,80 +391,57 @@ void txRxToModules()
     //Validar si se recibió un mensaje
     if (message != "")
     {
+      /*
+      if (message.indexOf('.') != -1)
+      {
+        //Obtener longitud del mensaje completo
+        int mLenght = message.length();
+        //Obtener indice del punto
+        int pointIdx = message.indexOf('.');
+        //Recortar a máximo 3 decimales
+        if (mLenght - pointIdx > 4)
+        {
+          message = message.substring(0, pointIdx + 3);
+        }
+      }*/
+
       //Evaluar el dato que se espera recibir
       switch (sensorType)
       {
       case 0: //Obtener valor de gas
-      
-        //Valor entrante
-        int nuevoValor;
-        nuevoValor = message.toInt();
-
-        if (nuevoValor >= 0 && nuevoValor <= 100)
-        {
-          /*//Evaluar si es diferente al actual
-          if (nuevoValor != nivelGas)
-          {
-            Serial.println("Cambio valor de gas, guardar...");
-          }*/
-        }
-
         //Convertir valor
-        nivelGas = nuevoValor;
+        nivelGas = message.toInt();
         //Mostrar valor si esta en pantalla de gas
         if (inGasScreen)
         {
           drawGasScreen();
         }
-        else if (inMainScreen)
-        {
-          setGasData();
-        }
 
         //Cambiar a pedir agua
-        sensorType = 0;
+        sensorType = 2;
         break;
 
       case 1: //Obtener valor de potencia eléctrica
-        //Acumular a totalizador de potencia
-        potAcc += (potInst * (millis() - acumuladorPotenciaRef)) / 3600000.0;
-        //Obtener potencia instantanea en string
-        potInst = message.toFloat();
-
-        //Mostrar valores
-        if (inElecScreen)
-        {
-          drawElecScreen();
-        }
-        else if (inMainScreen)
-        {
-          setElecData();
-        }
-        //Comenzar a contar tiempo de potencia actual
-        acumuladorPotenciaRef = millis();
-
         break;
 
       case 2: //Obtener valor de agua
         //Acumular a totalizador de litros
         litros += (caudalVal / 1000.000) * ((millis() - acumuladorCaudalRef) / 60000.000);
+        //Obtener caudal en string
+        caudal = message;
         //Convertir caudal a float
-        caudalVal = message.toFloat();
+        caudalVal = caudal.toFloat();
         //Si la ventana actual es la de caudal, refrescar
         if (inQScreen)
-        {
           drawQScreen();
-        }
-        else if (inMainScreen)
-        {
-          setGasData();
-        }
 
         //Comenzar a contar tiempo de caudal actual
         acumuladorCaudalRef = millis();
         //Cambiar a pedir gas
         sensorType = 0;
+        break;
 
+      default:
         break;
       }
 
@@ -569,7 +451,7 @@ void txRxToModules()
     }
 
     //Revisar si sucede un timeout
-    if (millis() - timeRef > 3000)
+    if (millis() - timeRef > 1500)
     {
       switch (sensorType)
       {
@@ -580,7 +462,7 @@ void txRxToModules()
       case 2:
         sensorType = 0;
         break;
-
+      
       default:
         break;
       }
@@ -588,29 +470,6 @@ void txRxToModules()
       sendOrReceive = true;
       timeRef = millis();
     }
-  }
-}
-
-void handleSaveMemoryData()
-{
-  static unsigned long timeRef;
-
-  if (millis() - timeRef > 60000)
-  {
-    //Evaluar caudal
-    if (caudalVal > 0)
-    {
-      //Guardar si hay caudal
-    }
-
-    //Evaluar potencia instantánea
-    if (potInst > 0)
-    {
-    }
-
-    //El nivel de gas se almacena a cada cambio
-    //Tomar referencia de tiempo
-    timeRef = millis();
   }
 }
 
@@ -628,9 +487,6 @@ void connectToWifi()
 
   //Configurar reloj
   configTime(0, 0, "pool.ntp.org");
-
-  //Inicializar OTA
-  initOTA();
 }
 
 time_t getEpochTime()
@@ -639,16 +495,6 @@ time_t getEpochTime()
   time(&now);
 
   return now;
-}
-
-void initOTA()
-{
-  //Definir nombre de OTA
-  ArduinoOTA.setHostname("MonitorGEA");
-  //Definir password
-  ArduinoOTA.setPassword("1234");
-  //Inicializar OTA
-  ArduinoOTA.begin();
 }
 
 String getCurrentTime()
@@ -675,7 +521,6 @@ String getCurrentTime()
   return timeStringBuff;
 }
 
-//Actualizar valores de base de datos
 void handleDbData()
 {
   static int op = 0;
