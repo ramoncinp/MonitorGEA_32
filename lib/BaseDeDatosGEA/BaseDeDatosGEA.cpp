@@ -87,6 +87,10 @@ String BaseDeDatosGEA::begin()
             return "";
         }
     }
+    else
+    {
+        return "";
+    }
 }
 
 bool BaseDeDatosGEA::actualizarSensores(int gas, double elec, double agua, double totElec, double totAgua)
@@ -151,8 +155,180 @@ bool BaseDeDatosGEA::agregarRegistroGas(int valor, time_t timeStamp)
 
         HTTPClient http;
 
-        http.begin(FIREBASE_URL + "/gas.json", certificate);
+        http.begin(FIREBASE_URL + "/registros/gas.json", certificate);
         int httpCode = http.POST(body);
+
+        if (httpCode == 200)
+        {
+            http.end();
+            return true;
+        }
+        else
+        {
+            http.end();
+            return false;
+        }
+    }
+    return false;
+}
+
+bool BaseDeDatosGEA::agregarRegistroElec(float valor, time_t timeStamp)
+{
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        //Crear body
+        String body = "";
+
+        //Crear un buffer dinámico
+        DynamicJsonBuffer jsonBuffer;
+        JsonObject &root = jsonBuffer.createObject();
+
+        //Agregar datos
+        root["valor"] = valor;
+        root["fecha"] = timeStamp;
+        root.printTo(body);
+
+        HTTPClient http;
+
+        http.begin(FIREBASE_URL + "/registros/electricidad.json", certificate);
+        int httpCode = http.POST(body);
+
+        if (httpCode == 200)
+        {
+            http.end();
+            return true;
+        }
+        else
+        {
+            http.end();
+            return false;
+        }
+    }
+    return false;
+}
+
+bool BaseDeDatosGEA::agregarRegistroAgua(float valor, time_t timeStamp)
+{
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        //Crear body
+        String body = "";
+
+        //Crear un buffer dinámico
+        DynamicJsonBuffer jsonBuffer;
+        JsonObject &root = jsonBuffer.createObject();
+
+        //Agregar datos
+        root["valor"] = valor;
+        root["fecha"] = timeStamp;
+        root.printTo(body);
+
+        HTTPClient http;
+
+        http.begin(FIREBASE_URL + "/registros/agua.json", certificate);
+        int httpCode = http.POST(body);
+
+        if (httpCode == 200)
+        {
+            http.end();
+            return true;
+        }
+        else
+        {
+            http.end();
+            return false;
+        }
+    }
+    return false;
+}
+
+bool BaseDeDatosGEA::modificarValoresGas(int valor)
+{
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        //Crear body
+        String body = "";
+
+        //Crear un buffer dinámico
+        DynamicJsonBuffer jsonBuffer;
+        JsonObject &root = jsonBuffer.createObject();
+
+        //Agregar datos
+        root["valor_actual"] = valor;
+        root.printTo(body);
+
+        HTTPClient http;
+
+        http.begin(FIREBASE_URL + "/periodos/gas.json", certificate);
+        int httpCode = http.PATCH(body);
+
+        if (httpCode == 200)
+        {
+            http.end();
+            return true;
+        }
+        else
+        {
+            http.end();
+            return false;
+        }
+    }
+    return false;
+}
+
+bool BaseDeDatosGEA::modificarValoresElec(float valor)
+{
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        //Crear body
+        String body = "";
+
+        //Crear un buffer dinámico
+        DynamicJsonBuffer jsonBuffer;
+        JsonObject &root = jsonBuffer.createObject();
+
+        //Agregar datos
+        root["valor_actual"] = valor;
+        root.printTo(body);
+
+        HTTPClient http;
+
+        http.begin(FIREBASE_URL + "/periodos/electricidad.json", certificate);
+        int httpCode = http.PATCH(body);
+
+        if (httpCode == 200)
+        {
+            http.end();
+            return true;
+        }
+        else
+        {
+            http.end();
+            return false;
+        }
+    }
+    return false;
+}
+
+bool BaseDeDatosGEA::modificarValoresAgua(float valor)
+{
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        //Crear body
+        String body = "";
+
+        //Crear un buffer dinámico
+        DynamicJsonBuffer jsonBuffer;
+        JsonObject &root = jsonBuffer.createObject();
+
+        //Agregar datos
+        root["valor_actual"] = valor;
+        root.printTo(body);
+
+        HTTPClient http;
+
+        http.begin(FIREBASE_URL + "/periodos/agua.json", certificate);
+        int httpCode = http.PATCH(body);
 
         if (httpCode == 200)
         {

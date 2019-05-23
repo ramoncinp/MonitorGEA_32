@@ -23,7 +23,7 @@
 #define RXD2 16
 
 //Constantes de tiempos
-const int REFRESH_SENSORS_DATA_DELAY = 5 * 60000; //5 minutos
+const int REFRESH_SENSORS_DATA_DELAY = 20000; //20 segundos
 
 //Declaración de funciones
 String getCurrentTime();
@@ -121,14 +121,14 @@ void setup()
 
 void loop()
 {
+  //Manejar Comunicacion con modulos
+  txRxToModules();
+
   //Toogle Pin
   tooglePin();
 
   //Manejar touch
   handleTouch();
-
-  //Manejar Comunicacion con modulos
-  txRxToModules();
 
   //Imprimir la hora actual cada 500 ms
   if (millis() - showCurrentTimeRef > 500)
@@ -141,8 +141,8 @@ void loop()
   //Actualizar datos en firebase
   if (millis() - updaeFirebaseDataRef > REFRESH_SENSORS_DATA_DELAY)
   {
+    handleDbData();
     updaeFirebaseDataRef = millis();
-    //handleDbData();
   }
 }
 
@@ -175,7 +175,7 @@ void getBdData()
   {
     //Crear un buffer dinámico
     DynamicJsonBuffer jsonBuffer;
-    JsonObject& root = jsonBuffer.parseObject(mData);
+    JsonObject &root = jsonBuffer.parseObject(mData);
 
     if (!root.success())
     {
@@ -428,7 +428,7 @@ void txRxToModules()
       default:
         break;
       }
-      delay(1);
+      delay(3);
 
       //Esperar respuesta
       sendOrReceive = false;
@@ -596,14 +596,24 @@ void handleDbData()
 
   switch (op)
   {
+  //Actualizar datos de gas
   case 0:
-    potInst += 0.10;
-    db.actualizarSensores(nivelGas, potInst, ++caudalVal, ++potAcc, ++litros);
+    db.modificarValoresGas(nivelGas);
+    db.agregarRegistroGas(nivelGas, getEpochTime());
     op++;
     break;
 
   case 1:
-    db.agregarRegistroGas(nivelGas, getEpochTime());
+    if (potAcc == 0)
+      return;
+    db.modificarValoresElec(potAcc);
+    db.agregarRegistroElec(potAcc, getEpochTime());
+    op++;
+    break;
+
+  case 2:
+    db.modificarValoresAgua(litros);
+    db.agregarRegistroAgua(litros, getEpochTime());
     op = 0;
     break;
   }
